@@ -2,6 +2,42 @@
 //  CLOCK APP — Full-featured: Clock, Alarm, Stopwatch, Timer, World Clock
 // ============================================================
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeReadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(fallback) ? (Array.isArray(parsed) ? parsed : fallback) : parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+function clampInt(value, min, max, fallback) {
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function formatTimezoneDiff(diffMinutes) {
+  if (diffMinutes === 0) return { text: 'Same', cls: 'same' };
+  const sign = diffMinutes > 0 ? '+' : '-';
+  const absMins = Math.abs(diffMinutes);
+  const hours = Math.floor(absMins / 60);
+  const mins = absMins % 60;
+  const text = mins === 0 ? `${sign}${hours}h` : `${sign}${hours}h ${mins}m`;
+  return { text, cls: diffMinutes > 0 ? 'ahead' : 'behind' };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
   // ===== TAB NAVIGATION =====
@@ -26,7 +62,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const dateDisplay = document.getElementById('dateDisplay');
   const markersContainer = document.querySelector('.clock-markers');
 
-  // Create clock markers & numbers
   function createClockFace() {
     for (let i = 0; i < 60; i++) {
       const marker = document.createElement('div');
@@ -35,7 +70,6 @@ document.addEventListener('DOMContentLoaded', () => {
       marker.style.transform = `translateX(-50%) rotate(${i * 6}deg)`;
       markersContainer.appendChild(marker);
     }
-    // Numbers
     const nums = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
     const clockFace = document.querySelector('.clock-face');
     const r = 95;
@@ -68,19 +102,14 @@ document.addEventListener('DOMContentLoaded', () => {
     minuteHand.style.transform = `rotate(${minDeg}deg)`;
     hourHand.style.transform = `rotate(${hourDeg}deg)`;
 
-    // Digital time
     const h12 = h % 12 || 12;
     const ampm = h < 12 ? 'AM' : 'PM';
     digitalTime.textContent = `${pad(h12)}:${pad(m)}:${pad(s)} ${ampm}`;
 
-    // Date
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const months = ['January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'];
     dateDisplay.textContent = `${days[now.getDay()]}, ${months[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`;
-
-    // Check alarms
-    checkAlarms(h, m, s);
 
     requestAnimationFrame(updateClock);
   }
@@ -89,11 +118,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function pad(n) { return String(n).padStart(2, '0'); }
 
   // ===== ALARM SYSTEM =====
-  let alarms = JSON.parse(localStorage.getItem('clockAppAlarms') || '[]');
+  let alarms = safeReadJSON('clockAppAlarms', []);
   let editingAlarmId = null;
-  let ringingAlarmId = null;
+  let ringingAlarm = null;
   let alarmAudioCtx = null;
-  let alarmOscillator = null;
+  let alarmBeepTimeout = null;
 
   const alarmModal = document.getElementById('alarmModal');
   const alarmList = document.getElementById('alarmList');
@@ -137,41 +166,43 @@ document.addEventListener('DOMContentLoaded', () => {
       if (btn.dataset.target === 'alarmAmPm') {
         target.value = target.value === 'AM' ? 'PM' : 'AM';
       } else if (btn.dataset.target === 'alarmHour') {
-        let v = parseInt(target.value) + dir;
-        if (v < 1) v = 12; if (v > 12) v = 1;
+        let v = clampInt(target.value, 1, 12, 7) + dir;
+        if (v < 1) v = 12;
+        if (v > 12) v = 1;
         target.value = pad(v);
       } else if (btn.dataset.target === 'alarmMinute') {
-        let v = parseInt(target.value) + dir;
-        if (v < 0) v = 59; if (v > 59) v = 0;
+        let v = clampInt(target.value, 0, 59, 0) + dir;
+        if (v < 0) v = 59;
+        if (v > 59) v = 0;
         target.value = pad(v);
       } else if (btn.dataset.target === 'timerHours') {
-        let v = parseInt(target.value) + dir;
-        if (v < 0) v = 23; if (v > 23) v = 0;
+        let v = clampInt(target.value, 0, 23, 0) + dir;
+        if (v < 0) v = 23;
+        if (v > 23) v = 0;
         target.value = pad(v);
       } else if (btn.dataset.target === 'timerMinutes' || btn.dataset.target === 'timerSeconds') {
-        let v = parseInt(target.value) + dir;
-        if (v < 0) v = 59; if (v > 59) v = 0;
+        let v = clampInt(target.value, 0, 59, 0) + dir;
+        if (v < 0) v = 59;
+        if (v > 59) v = 0;
         target.value = pad(v);
       }
     });
   });
 
-  // Day buttons
   dayBtns.forEach(btn => {
     btn.addEventListener('click', () => btn.classList.toggle('active'));
   });
 
   // Save alarm
   saveAlarmBtn.addEventListener('click', () => {
-    const hour = parseInt(alarmHourInput.value);
-    const minute = parseInt(alarmMinuteInput.value);
-    const ampm = alarmAmPmInput.value;
+    const hour = clampInt(alarmHourInput.value, 1, 12, 7);
+    const minute = clampInt(alarmMinuteInput.value, 0, 59, 0);
+    const ampm = alarmAmPmInput.value === 'PM' ? 'PM' : 'AM';
     const label = alarmLabelInput.value.trim();
     const sound = alarmSoundSelect.value;
     const days = [];
-    dayBtns.forEach(b => { if (b.classList.contains('active')) days.push(parseInt(b.dataset.day)); });
+    dayBtns.forEach(b => { if (b.classList.contains('active')) days.push(parseInt(b.dataset.day, 10)); });
 
-    // Convert to 24h for storage
     let h24 = hour;
     if (ampm === 'AM' && hour === 12) h24 = 0;
     else if (ampm === 'PM' && hour !== 12) h24 = hour + 12;
@@ -204,7 +235,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderAlarms() {
-    // Clear all alarm cards but keep the empty state
     document.querySelectorAll('.alarm-card').forEach(el => el.remove());
 
     if (alarms.length === 0) {
@@ -220,6 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const h12 = alarm.hour % 12 || 12;
       const ampm = alarm.hour < 12 ? 'AM' : 'PM';
       const dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+      const safeLabel = escapeHtml(alarm.label || '');
 
       let daysHTML = '';
       if (alarm.days.length > 0) {
@@ -232,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="alarm-info">
           <div class="alarm-time">${pad(h12)}:${pad(alarm.minute)} <small style="font-size:14px;color:var(--text-dim)">${ampm}</small></div>
           <div class="alarm-meta">
-            ${alarm.label ? `<span class="alarm-label">${alarm.label}</span>` : ''}
+            ${safeLabel ? `<span class="alarm-label">${safeLabel}</span>` : ''}
             ${daysHTML}
             ${alarm.days.length === 0 ? '<span>Once</span>' : ''}
           </div>
@@ -246,22 +277,20 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       `;
 
-      // Toggle
       card.querySelector('.toggle input').addEventListener('change', (e) => {
         alarm.active = e.target.checked;
+        if (alarm.active) alarm.lastTriggered = null;
         card.classList.toggle('active', alarm.active);
         card.classList.toggle('inactive', !alarm.active);
         saveAlarms();
       });
 
-      // Delete
       card.querySelector('.alarm-delete').addEventListener('click', () => {
         alarms = alarms.filter(a => a.id !== alarm.id);
         saveAlarms();
         renderAlarms();
       });
 
-      // Edit on click
       card.querySelector('.alarm-info').addEventListener('click', () => {
         editingAlarmId = alarm.id;
         alarmModalTitle.textContent = 'Edit Alarm';
@@ -269,10 +298,10 @@ document.addEventListener('DOMContentLoaded', () => {
         alarmHourInput.value = pad(h);
         alarmMinuteInput.value = pad(alarm.minute);
         alarmAmPmInput.value = alarm.hour < 12 ? 'AM' : 'PM';
-        alarmLabelInput.value = alarm.label;
-        alarmSoundSelect.value = alarm.sound;
+        alarmLabelInput.value = alarm.label || '';
+        alarmSoundSelect.value = alarm.sound || 'classic';
         dayBtns.forEach(b => {
-          b.classList.toggle('active', alarm.days.includes(parseInt(b.dataset.day)));
+          b.classList.toggle('active', alarm.days.includes(parseInt(b.dataset.day, 10)));
         });
         alarmModal.classList.add('show');
       });
@@ -282,20 +311,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   renderAlarms();
 
-  // Check alarms
-  function checkAlarms(h, m, s) {
-    if (s !== 0) return; // only check on exact second
+  // Check alarms reliably every second (works even if second 0 is skipped or tab was throttled)
+  function checkAlarms() {
     const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
     const dayOfWeek = now.getDay();
 
     alarms.forEach(alarm => {
       if (!alarm.active) return;
       if (alarm.hour !== h || alarm.minute !== m) return;
-
-      // Check day
       if (alarm.days.length > 0 && !alarm.days.includes(dayOfWeek)) return;
 
-      // Prevent re-triggering within same minute
       const triggerKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${h}-${m}`;
       if (alarm.lastTriggered === triggerKey) return;
       alarm.lastTriggered = triggerKey;
@@ -304,9 +331,10 @@ document.addEventListener('DOMContentLoaded', () => {
       triggerAlarm(alarm);
     });
   }
+  setInterval(checkAlarms, 1000);
 
   function triggerAlarm(alarm) {
-    ringingAlarmId = alarm.id;
+    ringingAlarm = alarm;
     const h12 = alarm.hour % 12 || 12;
     const ampm = alarm.hour < 12 ? 'AM' : 'PM';
     ringAlarmTime.textContent = `${pad(h12)}:${pad(alarm.minute)} ${ampm}`;
@@ -314,7 +342,6 @@ document.addEventListener('DOMContentLoaded', () => {
     alarmRingOverlay.classList.add('show');
     playAlarmSound(alarm.sound);
 
-    // If one-time alarm, disable it
     if (alarm.days.length === 0) {
       alarm.active = false;
       saveAlarms();
@@ -323,10 +350,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function playAlarmSound(type) {
+    stopAlarmSound();
     try {
       alarmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       playBeepPattern(type);
-    } catch (e) {}
+    } catch {
+      // Ignore autoplay restriction errors
+    }
   }
 
   function playBeepPattern(type) {
@@ -347,15 +377,20 @@ document.addEventListener('DOMContentLoaded', () => {
       gain.connect(alarmAudioCtx.destination);
       osc.frequency.value = f;
       osc.type = 'sine';
-      gain.gain.setValueAtTime(0.3, alarmAudioCtx.currentTime + i * p.interval / 1000);
-      osc.start(alarmAudioCtx.currentTime + i * p.interval / 1000);
-      osc.stop(alarmAudioCtx.currentTime + i * p.interval / 1000 + p.duration / 1000);
+      const startTime = alarmAudioCtx.currentTime + (i * p.interval) / 1000;
+      gain.gain.setValueAtTime(0.3, startTime);
+      osc.start(startTime);
+      osc.stop(startTime + p.duration / 1000);
     });
 
-    setTimeout(() => playBeepPattern(type), p.freq.length * p.interval + 500);
+    alarmBeepTimeout = setTimeout(() => playBeepPattern(type), p.freq.length * p.interval + 500);
   }
 
   function stopAlarmSound() {
+    if (alarmBeepTimeout !== null) {
+      clearTimeout(alarmBeepTimeout);
+      alarmBeepTimeout = null;
+    }
     if (alarmAudioCtx) {
       alarmAudioCtx.close();
       alarmAudioCtx = null;
@@ -365,22 +400,24 @@ document.addEventListener('DOMContentLoaded', () => {
   dismissBtn.addEventListener('click', () => {
     alarmRingOverlay.classList.remove('show');
     stopAlarmSound();
-    ringingAlarmId = null;
+    ringingAlarm = null;
   });
 
   snoozeBtn.addEventListener('click', () => {
+    const prevLabel = ringingAlarm && ringingAlarm.label ? `Snooze: ${ringingAlarm.label}` : 'Snooze';
+    const prevSound = (ringingAlarm && ringingAlarm.sound) || 'classic';
+
     alarmRingOverlay.classList.remove('show');
     stopAlarmSound();
 
-    // Snooze: create a one-time alarm 5 min from now
     const now = new Date();
     now.setMinutes(now.getMinutes() + 5);
     const snoozeAlarm = {
       id: Date.now(),
       hour: now.getHours(),
       minute: now.getMinutes(),
-      label: 'Snooze',
-      sound: 'classic',
+      label: prevLabel,
+      sound: prevSound,
       days: [],
       active: true,
       lastTriggered: null
@@ -388,16 +425,17 @@ document.addEventListener('DOMContentLoaded', () => {
     alarms.push(snoozeAlarm);
     saveAlarms();
     renderAlarms();
-    ringingAlarmId = null;
+    ringingAlarm = null;
   });
 
   // ===== STOPWATCH =====
   let swRunning = false;
   let swStartTime = 0;
   let swElapsed = 0;
+  let lapStart = 0;
+  let lapElapsed = 0;
   let swAnimFrame = null;
   let laps = [];
-  let lapStart = 0;
 
   const swTimeEl = document.getElementById('swTime');
   const swStartStopBtn = document.getElementById('swStartStop');
@@ -407,17 +445,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   swStartStopBtn.addEventListener('click', () => {
     if (!swRunning) {
+      const now = performance.now();
       swRunning = true;
-      swStartTime = performance.now() - swElapsed;
-      lapStart = lapStart || swStartTime;
+      swStartTime = now - swElapsed;
+      lapStart = now - lapElapsed;
       swStartStopBtn.textContent = 'Stop';
       swStartStopBtn.classList.add('running');
       swResetBtn.disabled = true;
       swLapBtn.disabled = false;
       updateStopwatch();
     } else {
+      const now = performance.now();
       swRunning = false;
-      swElapsed = performance.now() - swStartTime;
+      swElapsed = now - swStartTime;
+      lapElapsed = now - lapStart;
       cancelAnimationFrame(swAnimFrame);
       swStartStopBtn.textContent = 'Start';
       swStartStopBtn.classList.remove('running');
@@ -431,6 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
     swElapsed = 0;
     swStartTime = 0;
     lapStart = 0;
+    lapElapsed = 0;
     laps = [];
     cancelAnimationFrame(swAnimFrame);
     swTimeEl.textContent = '00:00.00';
@@ -447,6 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalMs = now - swStartTime;
     const lapMs = now - lapStart;
     lapStart = now;
+    lapElapsed = 0;
     laps.unshift({ total: totalMs, diff: lapMs });
     renderLaps();
   });
@@ -507,6 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let timerRunning = false;
   let timerInterval = null;
   let timerAudioCtx = null;
+  let timerBeepTimeout = null;
 
   const timerSetup = document.getElementById('timerSetup');
   const timerRunningEl = document.getElementById('timerRunning');
@@ -521,10 +565,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const timerPauseResumeBtn = document.getElementById('timerPauseResume');
   const timerDismissBtn = document.getElementById('timerDismiss');
 
-  // Presets
   document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const secs = parseInt(btn.dataset.seconds);
+      const secs = parseInt(btn.dataset.seconds, 10);
       const h = Math.floor(secs / 3600);
       const m = Math.floor((secs % 3600) / 60);
       const s = secs % 60;
@@ -535,11 +578,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   startTimerBtn.addEventListener('click', () => {
-    const h = parseInt(timerHoursInput.value) || 0;
-    const m = parseInt(timerMinutesInput.value) || 0;
-    const s = parseInt(timerSecondsInput.value) || 0;
+    const h = clampInt(timerHoursInput.value, 0, 23, 0);
+    const m = clampInt(timerMinutesInput.value, 0, 59, 0);
+    const s = clampInt(timerSecondsInput.value, 0, 59, 0);
     timerTotal = h * 3600 + m * 60 + s;
     if (timerTotal <= 0) return;
+
     timerRemaining = timerTotal;
     timerRunning = true;
 
@@ -555,12 +599,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function startTimerInterval() {
+    if (timerInterval !== null) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
       if (!timerRunning) return;
       timerRemaining--;
       updateTimerDisplay();
       if (timerRemaining <= 0) {
         clearInterval(timerInterval);
+        timerInterval = null;
         timerRunning = false;
         timerRunningEl.classList.add('hidden');
         timerDone.classList.remove('hidden');
@@ -580,9 +626,8 @@ document.addEventListener('DOMContentLoaded', () => {
       timerDisplay.textContent = `${pad(m)}:${pad(s)}`;
     }
 
-    // Update progress ring
-    const circumference = 2 * Math.PI * 90; // r=90
-    const progress = timerRemaining / timerTotal;
+    const circumference = 2 * Math.PI * 90;
+    const progress = timerTotal > 0 ? timerRemaining / timerTotal : 0;
     timerProgress.style.strokeDashoffset = circumference * (1 - progress);
   }
 
@@ -590,6 +635,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (timerRunning) {
       timerRunning = false;
       clearInterval(timerInterval);
+      timerInterval = null;
       timerPauseResumeBtn.textContent = 'Resume';
       timerPauseResumeBtn.classList.add('running');
     } else {
@@ -603,6 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
   timerCancelBtn.addEventListener('click', () => {
     timerRunning = false;
     clearInterval(timerInterval);
+    timerInterval = null;
     timerRunningEl.classList.add('hidden');
     timerSetup.classList.remove('hidden');
   });
@@ -614,14 +661,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function playTimerDoneSound() {
+    stopTimerSound();
     try {
       timerAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       timerBeep();
-    } catch (e) {}
+    } catch {
+      // Ignore autoplay restriction errors
+    }
   }
 
   function timerBeep() {
-    if (!timerAudioCtx || timerSetup.classList.contains('hidden') === false) return;
+    if (!timerAudioCtx || !timerSetup.classList.contains('hidden')) return;
     const freqs = [800, 1000, 800];
     freqs.forEach((f, i) => {
       const osc = timerAudioCtx.createOscillator();
@@ -630,14 +680,19 @@ document.addEventListener('DOMContentLoaded', () => {
       gain.connect(timerAudioCtx.destination);
       osc.frequency.value = f;
       osc.type = 'sine';
-      gain.gain.setValueAtTime(0.25, timerAudioCtx.currentTime + i * 0.2);
-      osc.start(timerAudioCtx.currentTime + i * 0.2);
-      osc.stop(timerAudioCtx.currentTime + i * 0.2 + 0.15);
+      const startTime = timerAudioCtx.currentTime + i * 0.2;
+      gain.gain.setValueAtTime(0.25, startTime);
+      osc.start(startTime);
+      osc.stop(startTime + 0.15);
     });
-    setTimeout(timerBeep, 1500);
+    timerBeepTimeout = setTimeout(timerBeep, 1500);
   }
 
   function stopTimerSound() {
+    if (timerBeepTimeout !== null) {
+      clearTimeout(timerBeepTimeout);
+      timerBeepTimeout = null;
+    }
     if (timerAudioCtx) {
       timerAudioCtx.close();
       timerAudioCtx = null;
@@ -698,8 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { city: 'Bogota', tz: 'America/Bogota', country: 'Colombia' },
   ];
 
-  let worldClocks = JSON.parse(localStorage.getItem('clockAppWorldClocks') || '[]');
-  // Default clocks if empty
+  let worldClocks = safeReadJSON('clockAppWorldClocks', []);
   if (worldClocks.length === 0) {
     worldClocks = [
       { city: 'New York', tz: 'America/New_York', country: 'USA' },
@@ -740,9 +794,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ).slice(0, 10);
 
     cityResults.innerHTML = filtered.map(tz => `
-      <div class="city-result-item" data-city="${tz.city}" data-tz="${tz.tz}" data-country="${tz.country}">
-        <span class="city-name">${tz.city}, ${tz.country}</span>
-        <span class="city-tz">${tz.tz}</span>
+      <div class="city-result-item" data-city="${escapeHtml(tz.city)}" data-tz="${escapeHtml(tz.tz)}" data-country="${escapeHtml(tz.country)}">
+        <span class="city-name">${escapeHtml(tz.city)}, ${escapeHtml(tz.country)}</span>
+        <span class="city-tz">${escapeHtml(tz.tz)}</span>
       </div>
     `).join('');
 
@@ -762,7 +816,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderWorldClocks() {
     wcList.innerHTML = '';
-    const localOffset = new Date().getTimezoneOffset();
 
     worldClocks.forEach((wc, idx) => {
       const now = new Date();
@@ -772,23 +825,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const timeStr = now.toLocaleTimeString('en-US', options);
       const dateStr = now.toLocaleDateString('en-US', dateOptions);
 
-      // Calculate offset difference
-      const utcDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+      // Compute exact minute-level timezone offset (handles half-hour & 45-min zones like India +05:30)
       const tzDate = new Date(now.toLocaleString('en-US', { timeZone: wc.tz }));
       const localDate = new Date(now.toLocaleString('en-US'));
-      const diffHours = Math.round((tzDate - localDate) / (1000 * 60 * 60));
-
-      let diffStr = '';
-      let diffClass = 'same';
-      if (diffHours > 0) { diffStr = `+${diffHours}h`; diffClass = 'ahead'; }
-      else if (diffHours < 0) { diffStr = `${diffHours}h`; diffClass = 'behind'; }
-      else { diffStr = 'Same'; }
+      const diffMinutes = Math.round((tzDate - localDate) / (1000 * 60));
+      const { text: diffStr, cls: diffClass } = formatTimezoneDiff(diffMinutes);
 
       const card = document.createElement('div');
       card.className = 'wc-card';
       card.innerHTML = `
         <div class="wc-info">
-          <div class="wc-city">${wc.city}</div>
+          <div class="wc-city">${escapeHtml(wc.city)}</div>
           <div class="wc-offset">
             <span class="wc-diff ${diffClass}">${diffStr}</span>
           </div>
@@ -818,12 +865,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // ===== INPUT VALIDATION for picker inputs =====
   document.querySelectorAll('.picker-input:not(.ampm)').forEach(input => {
     input.addEventListener('blur', () => {
-      let v = parseInt(input.value) || 0;
       const id = input.id;
-      if (id === 'alarmHour') { v = Math.max(1, Math.min(12, v)); }
-      else if (id === 'alarmMinute') { v = Math.max(0, Math.min(59, v)); }
-      else if (id === 'timerHours') { v = Math.max(0, Math.min(23, v)); }
-      else { v = Math.max(0, Math.min(59, v)); }
+      let v;
+      if (id === 'alarmHour') v = clampInt(input.value, 1, 12, 7);
+      else if (id === 'alarmMinute') v = clampInt(input.value, 0, 59, 0);
+      else if (id === 'timerHours') v = clampInt(input.value, 0, 23, 0);
+      else v = clampInt(input.value, 0, 59, 0);
       input.value = pad(v);
     });
 

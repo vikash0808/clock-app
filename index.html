@@ -82,7 +82,7 @@
         <div class="alarm-container">
           <div class="alarm-header">
             <h2>Alarms</h2>
-            <button class="btn-add" id="addAlarmBtn">
+            <button class="btn-add" id="addAlarmBtn" aria-label="Add alarm">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
@@ -136,7 +136,7 @@
               <button class="day-btn" data-day="6">S</button>
             </div>
             <div class="alarm-sound-row">
-              <label>Sound</label>
+              <label for="alarmSound">Sound</label>
               <select id="alarmSound">
                 <option value="classic">Classic</option>
                 <option value="digital">Digital</option>
@@ -147,19 +147,6 @@
             <div class="modal-actions">
               <button class="btn-cancel" id="cancelAlarm">Cancel</button>
               <button class="btn-save" id="saveAlarm">Save</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Alarm Ringing Overlay -->
-        <div class="alarm-ring-overlay" id="alarmRingOverlay">
-          <div class="alarm-ring-content">
-            <div class="ring-icon">🔔</div>
-            <h2 id="ringAlarmTime">07:00 AM</h2>
-            <p id="ringAlarmLabel">Alarm</p>
-            <div class="ring-actions">
-              <button class="btn-snooze" id="snoozeBtn">Snooze (5 min)</button>
-              <button class="btn-dismiss" id="dismissBtn">Dismiss</button>
             </div>
           </div>
         </div>
@@ -187,7 +174,7 @@
           <div class="timer-setup" id="timerSetup">
             <div class="timer-input-group">
               <div class="timer-col">
-                <label>Hours</label>
+                <label for="timerHours">Hours</label>
                 <div class="timer-input-wrap">
                   <button class="picker-arrow up" data-target="timerHours" data-dir="up">▲</button>
                   <input type="text" id="timerHours" value="00" maxlength="2" class="picker-input">
@@ -196,7 +183,7 @@
               </div>
               <span class="picker-sep timer-sep">:</span>
               <div class="timer-col">
-                <label>Minutes</label>
+                <label for="timerMinutes">Minutes</label>
                 <div class="timer-input-wrap">
                   <button class="picker-arrow up" data-target="timerMinutes" data-dir="up">▲</button>
                   <input type="text" id="timerMinutes" value="05" maxlength="2" class="picker-input">
@@ -205,7 +192,7 @@
               </div>
               <span class="picker-sep timer-sep">:</span>
               <div class="timer-col">
-                <label>Seconds</label>
+                <label for="timerSeconds">Seconds</label>
                 <div class="timer-input-wrap">
                   <button class="picker-arrow up" data-target="timerSeconds" data-dir="up">▲</button>
                   <input type="text" id="timerSeconds" value="00" maxlength="2" class="picker-input">
@@ -253,7 +240,7 @@
         <div class="worldclock-container">
           <div class="wc-header">
             <h2>World Clock</h2>
-            <button class="btn-add" id="addCityBtn">
+            <button class="btn-add" id="addCityBtn" aria-label="Add city">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
@@ -277,6 +264,19 @@
       </section>
 
     </main>
+
+    <!-- Global Alarm Ringing Overlay (visible from any active tab) -->
+    <div class="alarm-ring-overlay" id="alarmRingOverlay" role="alertdialog" aria-live="assertive">
+      <div class="alarm-ring-content">
+        <div class="ring-icon">🔔</div>
+        <h2 id="ringAlarmTime">07:00 AM</h2>
+        <p id="ringAlarmLabel">Alarm</p>
+        <div class="ring-actions">
+          <button class="btn-snooze" id="snoozeBtn">Snooze (5 min)</button>
+          <button class="btn-dismiss" id="dismissBtn">Dismiss</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
